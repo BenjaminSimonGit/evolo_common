@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
+from cam_gimbal_msgs.msg import gcu_data
 
 import socket
 import binascii
@@ -31,14 +32,33 @@ class GimbalReadAndPublish(Node):
         self.subscription # prevent unused variable warning
 
     def timer_callback(self):
-        msg = Vector3()
+        msg = gcu_data()
         data_from_camera = send_null_command()
-        extracted_data = struct.unpack("<hhh",data_from_camera[12:18])
 
-        # Store data and convert to Evolos Coordinate system
-        msg.x = extracted_data[1] / 100.0
-        msg.y = extracted_data[0] / 100.0
-        msg.z = extracted_data[2] / -100.0
+        # Store operating mode
+        extracted_operating_mode = struct.unpack("B", data_from_camera[5:6])
+        gcu_data.operating_mode = extracted_operating_mode
+
+        # Store relative angle and convert to Evolos Coordinate system
+        extracted_relative_angle = struct.unpack("<hhh",data_from_camera[12:18])
+        gcu_data.relative_pitch = extracted_relative_angle[1] / 100.0
+        gcu_data.relative_roll = extracted_relative_angle[0] / 100.0
+        gcu_data.relative_yaw = extracted_relative_angle[2] / -100.0
+
+        # Store absolute angle 
+        extracted_absolute_angle = struct.unpack("<hhh",data_from_camera[18:24])
+        gcu_data.absolute_pitch = extracted_absolute_angle[0] / 100.0
+        gcu_data.absolute_roll = extracted_absolute_angle[1] / 100.0
+        gcu_data.absolute_yaw = extracted_absolute_angle[2] / 100.0
+
+        # Store error code
+        extracted_error_code = struct.unpack("<h", data_from_camera[41:43])
+        gcu_data.operating_mode = extracted_operating_mode
+
+        # Store camera status
+        extracted_camera_status = struct.unpack("<h", data_from_camera[64:66])
+        gcu_data.osd = bool(getBit(extracted_camera_status, 13)) # B13: 0 - OSD off, 1 - OSD on
+        gcu_data.recording = bool(getBit(extracted_camera_status, 4)) # B4: 0 - not recording, 1 - recording
 
         print(msg)
         self.publisher_.publish(msg)
@@ -47,6 +67,11 @@ class GimbalReadAndPublish(Node):
         print(f"desired_gimbal_euler received: x:{msg.x}, {msg.y}, {msg.z}") # print for debugging
         send_euler_command(int(msg.x), int(msg.y), int(msg.z)) # Send euler order
         send_null_command() # Seperate orders with a null command (required by gimbal)
+
+# This function returns the value of bit n
+def getBit(value, n):
+    return (value >> n) & 1
+
 
 
 def build_packet(

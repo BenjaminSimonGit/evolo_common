@@ -8,6 +8,6 @@ float32 absolute_pitch
 float32 absolute_yaw
 float32 absolute_roll
 
-int8 error_code
+int16 error_code
 bool osd
 bool recording

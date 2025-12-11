@@ -52,6 +52,8 @@ class GimbalReadAndPublish(Node):
         msg.absolute_yaw = extracted_absolute_angle[2] / 100.0
 
         # Store error code
+        # B15: GCU Hardware error, B14: GNSS unpositioned, B13: MavLink communication frequency anomaly,
+        # B12 - B8: Reserved, B7: Pod Hardware error, B6 - B0: Reserved
         extracted_error_code = struct.unpack("<h", data_from_camera[41:43])
         msg.error_code = extracted_error_code[0]
 
@@ -60,7 +62,6 @@ class GimbalReadAndPublish(Node):
         msg.osd = bool(getBit(extracted_camera_status[0], 13)) # B13: 0 - OSD off, 1 - OSD on
         msg.recording = bool(getBit(extracted_camera_status[0], 4)) # B4: 0 - not recording, 1 - recording
 
-        print(msg)
         self.publisher_.publish(msg)
 
     def listener_callback(self, msg):
@@ -71,8 +72,6 @@ class GimbalReadAndPublish(Node):
 # This function returns the value of bit n
 def getBit(value, n):
     return (value >> n) & 1
-
-
 
 def build_packet(
     order: int,

@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
+from cam_gimbal_msgs.msg import Gcudata
 
 import socket
 import binascii
@@ -22,7 +23,7 @@ class GimbalReadAndPublish(Node):
         super().__init__('read_and_publish')
 
         # Create publisher
-        self.publisher_ = self.create_publisher(Vector3, 'gimbal_euler', 10)
+        self.publisher_ = self.create_publisher(Gcudata, 'cam_gcu_data', 10)
         timer_period = 1/50  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
@@ -31,16 +32,36 @@ class GimbalReadAndPublish(Node):
         self.subscription # prevent unused variable warning
 
     def timer_callback(self):
-        msg = Vector3()
+        msg = Gcudata()
         data_from_camera = send_null_command()
-        extracted_data = struct.unpack("<hhh",data_from_camera[12:18])
 
-        # Store data and convert to Evolos Coordinate system
-        msg.x = extracted_data[1] / 100.0
-        msg.y = extracted_data[0] / 100.0
-        msg.z = extracted_data[2] / -100.0
+        # Store operating mode
+        extracted_operating_mode = struct.unpack("B", data_from_camera[5:6])
+        msg.operating_mode = extracted_operating_mode[0]
 
-        print(msg)
+        # Store relative angle and convert to Evolos Coordinate system
+        extracted_relative_angle = struct.unpack("<hhh",data_from_camera[12:18])
+        msg.relative_pitch = extracted_relative_angle[1] / 100.0
+        msg.relative_roll = extracted_relative_angle[0] / 100.0
+        msg.relative_yaw = extracted_relative_angle[2] / -100.0
+
+        # Store absolute angle 
+        extracted_absolute_angle = struct.unpack("<hhh",data_from_camera[18:24])
+        msg.absolute_pitch = extracted_absolute_angle[0] / 100.0
+        msg.absolute_roll = extracted_absolute_angle[1] / 100.0
+        msg.absolute_yaw = extracted_absolute_angle[2] / 100.0
+
+        # Store error code
+        # B15: GCU Hardware error, B14: GNSS unpositioned, B13: MavLink communication frequency anomaly,
+        # B12 - B8: Reserved, B7: Pod Hardware error, B6 - B0: Reserved
+        extracted_error_code = struct.unpack("<h", data_from_camera[41:43])
+        msg.error_code = extracted_error_code[0]
+
+        # Store camera status
+        extracted_camera_status = struct.unpack("<h", data_from_camera[64:66])
+        msg.osd = bool(getBit(extracted_camera_status[0], 13)) # B13: 0 - OSD off, 1 - OSD on
+        msg.recording = bool(getBit(extracted_camera_status[0], 4)) # B4: 0 - not recording, 1 - recording
+
         self.publisher_.publish(msg)
 
     def listener_callback(self, msg):
@@ -48,6 +69,9 @@ class GimbalReadAndPublish(Node):
         send_euler_command(int(msg.x), int(msg.y), int(msg.z)) # Send euler order
         send_null_command() # Seperate orders with a null command (required by gimbal)
 
+# This function returns the value of bit n
+def getBit(value, n):
+    return (value >> n) & 1
 
 def build_packet(
     order: int,
@@ -140,6 +164,18 @@ def send_euler_command(roll: int, pitch: int, yaw: int):
         )
         sock.sendall(packet)
         sock.recv(1024)
+
+def send_toggle_record_command():
+    global sock
+    if sock:
+        send_null_command()
+        packet = build_packet(
+            order=0x21,
+            param_bytes=b"/x01",
+            ctrl_valid=True,
+        )
+        sock.sendall(packet)
+        return sock.recv(1024)
 
 
 
